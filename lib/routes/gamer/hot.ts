@@ -9,7 +9,7 @@ export const route: Route = {
     path: '/hot/:bsn',
     categories: ['anime'],
     view: ViewType.Articles,
-    example: '/gamer/hot/47157',
+    example: '/gamer/hot/23805',
     parameters: { bsn: '板塊 id，在 URL 可以找到' },
     features: {
         requireConfig: false,
@@ -25,7 +25,7 @@ export const route: Route = {
 };
 
 async function handler(ctx) {
-    const rootUrl = `https://forum.gamer.com.tw/A.php?bsn=${ctx.req.param('bsn')}`;
+    const rootUrl = `https://forum.gamer.com.tw/B.php?bsn=${ctx.req.param('bsn')}`;
     const response = await got({
         url: rootUrl,
         headers: {
@@ -34,12 +34,15 @@ async function handler(ctx) {
     });
 
     const $ = load(response.data);
-    const list = $('div.FM-abox2A a.FM-abox2B')
+
+    // 使用修正後的選擇器
+    const list = $('div.popular__item > a')
         .toArray()
         .map((item) => {
-            item = $(item);
+            const link = $(item).attr('href');
             return {
-                link: `https:${item.attr('href')}`,
+                // 確保連結是完整的 URL
+                link: new URL(link, 'https://forum.gamer.com.tw/').href,
             };
         });
 
@@ -54,24 +57,29 @@ async function handler(ctx) {
                 });
                 const content = load(detailResponse.data);
 
+                // 移除文章底部的按鈕區塊
                 content('div.c-post__body__buttonbar').remove();
 
-                item.title = content('.c-post__header__title').text();
+                const postTitle = content('.c-post__header__title').text();
+
+                // 如果文章被刪除或不存在，標題會是空的，則跳過此項目
+                if (!postTitle) {
+                    return null;
+                }
+
+                item.title = postTitle;
                 item.description = content('div.c-post__body').html();
                 item.author = `${content('a.username').eq(0).text()} (${content('a.userid').eq(0).text()})`;
-                item.pubDate = timezone(parseDate(content('a.edittime').eq(0).attr('data-mtime'), +8));
+                item.pubDate = timezone(parseDate(content('a.edittime').eq(0).attr('data-mtime')), +8);
 
                 return item;
             })
         )
-    );
+    ).then((items) => items.filter(Boolean)); // 過濾掉剛才被設定為 null 的項目
 
-    const ret = {
+    return {
         title: $('title').text(),
         link: rootUrl,
         item: items,
     };
-
-    ctx.set('json', ret);
-    return ret;
 }
